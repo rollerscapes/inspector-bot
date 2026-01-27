@@ -1,0 +1,300 @@
+name: InspectorBot
+
+on:
+    workflow_call:
+        inputs:
+            package:
+                required: true
+                type: string
+            check_license:
+                required: false
+                type: boolean
+                default: false
+
+env:
+    GH_TOKEN: ${{ github.token }}
+
+jobs:
+    check:
+        name: Checks
+        runs-on: ubuntu-24.04
+        steps:
+            -
+                name: Checkout code
+                uses: actions/checkout@v6
+                with:
+                    path: o
+
+            -
+                name: Prepare code
+                env:
+                    REPO: ${{ github.repository_owner }}/${{ github.event.repository.name }}
+                    PR: ${{ github.event.pull_request.number }}
+                run: |
+                    # Install dependencies and select files to check
+                    pip install codespell &
+                    composer global require -q friendsofphp/php-cs-fixer:^3 seld/jsonlint symfony/yaml vincentlanglet/twig-cs-fixer:^3 &
+                    
+                    mkdir a
+                    [ -e o/.php-cs-fixer.dist.php ] && cp -a {o,a}/.php-cs-fixer.dist.php
+                    [ -e o/.twig-cs-fixer.dist.php ] && cp -a {o,a}/.twig-cs-fixer.dist.php
+                    
+                    gh api --paginate "/repos/$REPO/pulls/$PR/files" \
+                      | jq -rc '.[] | select(.status != "removed") | .filename' \
+                      | while read -r FILENAME; do
+                        mkdir -p "a/$(dirname "$FILENAME")"
+                        cp -a {o,a}/"$FILENAME"
+                      done
+                    
+                    wait
+
+            -
+                name: Check PHP code style
+                if: always()
+                run: |
+                    # Run PHP-CS-Fixer
+                    cp -a a b && cd b
+                    ~/.composer/vendor/bin/php-cs-fixer fix --using-cache no --show-progress none
+                    cd ..
+                    
+                    if ! diff -qr --no-dereference a/ b/ >/dev/null; then
+                      echo "::error::PHP-CS-Fixer found style issues. Please apply the patch below."
+                      echo -e "\n \n git apply - <<'EOF_PATCH'"
+                      diff -pru2 --no-dereference --color=always a/ b/ || true
+                      echo -e "EOF_PATCH\n \n"
+                      echo "Then commit the changes and push to your PR branch."
+                      exit 1
+                    fi
+
+            -
+                name: Check Twig code style
+                if: always() && hashFiles('o/.twig-cs-fixer.dist.php') != ''
+                run: |
+                    # Run Twig-CS-Fixer
+                    rm -rf b && cp -a a b && cd b
+                    ~/.composer/vendor/bin/twig-cs-fixer fix --no-cache
+                    cd ..
+                    
+                    if ! diff -qr --no-dereference a/ b/ >/dev/null; then
+                      echo "::error::Twig-CS-Fixer found style issues. Please apply the patch below."
+                      echo -e "\n \n git apply - <<'EOF_PATCH'"
+                      diff -pru2 --no-dereference --color=always a/ b/ || true
+                      echo -e "EOF_PATCH\n \n"
+                      echo "Then commit the changes and push to your PR branch."
+                      exit 1
+                    fi
+
+#            -
+#                name: Check for common typos
+#                if: always()
+#                run: |
+#                    # Run codespell
+#                    rm -rf b && cp -a a b && cd b
+#                    codespell -L invokable --check-filenames -w --skip='composer.lock,pnpm-lock.yaml,*.xlf,*/Symfony/Component/Intl/Resources/data/*' || true
+#                    cd ..
+#
+#                    if ! diff -qr --no-dereference a/ b/ >/dev/null; then
+#                      echo "::error::PHP-CS-Fixer found typos. Please apply the patch below."
+#                      echo -e "\n \n git apply - <<'EOF_PATCH'"
+#                      diff -pru2 --no-dereference --color=always a/ b/ || true
+#                      echo -e "EOF_PATCH\n \n"
+#                      echo "Then commit the changes and push to your PR branch."
+#                      exit 1
+#                    fi
+
+            -
+                name: Check for readonly classes
+                if: always()
+                run: |
+                    # If a PR contains readonly classes, fail the job
+                    rm -rf b && cp -a a b && cd b
+                    sed -i 's/^\(abstract \|final \)\?readonly class/\1class/' -- $(grep '^\(abstract \|final \)\?readonly class' src/ -rl) || true
+                    cd ..
+                    
+                    if ! diff -qr --no-dereference a/ b/ >/dev/null; then
+                      echo "::error::Readonly classes should be replaced by readonly properties."
+                      echo -e "\n \n git apply - <<'EOF_PATCH'"
+                      diff -pru2 --no-dereference --color=always a/ b/ || true
+                      echo -e "EOF_PATCH\n \n"
+                      echo "Move the readonly keyword to properties then commit the changes and push to your PR branch."
+                      exit 1
+                    fi
+
+            -
+                name: Check for merge commits
+                if: always()
+                env:
+                    REPO: ${{ github.repository_owner }}/${{ github.event.repository.name }}
+                    PR: ${{ github.event.pull_request.number }}
+                run: |
+                    # If a PR contains merge commits, fail the job
+                    gh api -H "Accept: application/vnd.github.v3+json" \
+                      "/repos/$REPO/pulls/$PR/commits" \
+                      | jq -r '.[].parents | length > 1' | grep true > /dev/null && {
+                        echo "::error::Merge commits are not allowed in pull requests."
+                        echo "Please rebase your branch."
+                        exit 1
+                      } || true
+
+            -
+                name: Check @deprecated annotations
+                if: always()
+                run: |
+                    # @deprecated annotations should mention ${{ inputs.package }}
+                    rm -rf b && cp -a a b && cd b
+                    find -name '*.php' -o -name '*.js' -o -name '*.ts' \
+                      | while read -r FILE; do
+                        sed -i -E 's/(@deprecated since )([0-9])/\1${{ inputs.package }} \2/' "$FILE"
+                      done
+                    cd ..
+                    
+                    if ! diff -qr --no-dereference a/ b/ >/dev/null; then
+                      echo "::error::@deprecated annotations should mention ${{ inputs.package }}. Please apply the patch below."
+                      echo -e "\n \n git apply - <<'EOF_PATCH'"
+                      diff -pru2 --no-dereference --color=always a/ b/ || true
+                      echo -e "EOF_PATCH\n \n"
+                      echo "Then commit the changes and push to your PR branch."
+                      exit 1
+                    fi
+
+## Eventually we will use this, but the documentation is currently lacking.
+#            -
+#                name: Check PR header
+#                if: always()
+#                env:
+#                    PR_TITLE: ${{ github.event.pull_request.title }}
+#                    PR_BODY: ${{ github.event.pull_request.body }}
+#                run: |
+#                    # Check if the PR title and body follow the Symfony contribution guidelines
+#                    if [[ "${{ inputs.check_license }}" == "true" ]]; then
+#                      if [[ ! "$PR_BODY" =~ \|\ License[\ ]+\|\ MIT ]]; then
+#                        echo "::error::You must add the standard contribution header in the PR description"
+#                        echo "See https://symfony.com/doc/current/contributing/code/patches.html#make-a-pull-request"
+#                        exit 1
+#                      fi
+#                    fi
+#
+#                    if [[ "$PR_TITLE" =~ (feat|fix|docs|style|refactor|perf|test|chore|revert|build|ci|types?|wip)[:()] ]]; then
+#                      echo "::error::Don't use conventional commits in PR titles."
+#                      echo "We'll add the appropriate prefix while merging."
+#                      echo "Use the component name instead, e.g., [Component] Description."
+#                      exit 1
+#                    fi
+
+            -
+                name: Check YAML files
+                if: always()
+                run: |
+                    # Check YAML files for syntax errors
+                    rm -rf b && cp -a a b && cd b
+                    find . -name '*.yml' -o -name '*.yaml' \
+                      | while read -r FILE; do php -r '
+                        use Symfony\Component\Yaml\{Parser,Yaml};
+                        require $_SERVER["HOME"]."/.composer/vendor/autoload.php";
+                        try { (new Parser())->parse(file_get_contents($argv[1]), Yaml::PARSE_CUSTOM_TAGS); }
+                        catch (Exception $e) { echo "::error::in $argv[1]:\n{$e->getMessage()}\n"; exit(1); }
+                      ' "$FILE"
+                      done
+                    cd ..
+
+            -
+                name: Check JSON files
+                if: always()
+                run: |
+                    # Check JSON files for syntax errors
+                    rm -rf b && cp -a a b && cd b
+                    find . -name '*.json' \
+                      | while read -r FILE; do php -r '
+                        use Seld\JsonLint\JsonParser;
+                        require $_SERVER["HOME"]."/.composer/vendor/autoload.php";
+                        try { (new JsonParser())->parse(file_get_contents($argv[1])); }
+                        catch (Exception $e) { echo "::error:: in $argv[1]: {$e->getMessage()}\n"; exit(1); }
+                        ' "$FILE"
+                      done
+                    cd ..
+
+            -
+                name: Check exception messages
+                if: always()
+                run: |
+                    # Placeholders should be enclosed in double-quotes and messages should end with a dot
+                    rm -rf b && cp -a a b && cd b
+                    find -name '*.php' \
+                      | while read -r FILE; do php -r "$(cat <<'EOPHP'
+                        $new = preg_replace_callback('{throw new ([^\(]+)\((.+?)\);}', function ($match) {
+                          $contents = $match[2];
+                    
+                          // %s::%s() -> "%s::%s()"
+                          $contents = preg_replace('{(?<= )%s\:\:%s(\(\))?}', '"%s::%s()"', $contents);
+                          $contents = preg_replace('{\(\'%s\:\:%s(\(\))?}', '(\'"%s::%s()"', $contents);
+                    
+                          // %s() -> "%s()"
+                          $contents = preg_replace('{(?<= )%s(\(\))}', '"%s$1"', $contents);
+                          $contents = preg_replace('{\(\'%s(\(\))}', '(\'"%s$1"', $contents);
+                    
+                          // %s -> "%s" after a space
+                          $contents = preg_replace('{(?<= )%s}', '"%s"', $contents);
+                          $contents = preg_replace('{\(\'%s}', '(\'"%s"', $contents);
+                    
+                          return sprintf('throw new %s(%s);', $match[1], $contents);
+                        }, $old = file_get_contents($argv[1]));
+                    
+                        // ensure there is a dot at the end of the exception message
+                        // except for files under Tests/
+                        if (false === stripos($argv[1], '/Tests/')) {
+                          $new = preg_replace_callback('{throw new ([^\(]+)\((sprintf\()?(\'|")(.+?)(?<!\\\)(\3)}', function ($match) {
+                            if ('UnexpectedTypeException' === $match[1]) {
+                              return $match[0];
+                            }
+                    
+                            return sprintf('throw new %s(%s%s%s%s%s', $match[1], $match[2], $match[3], $match[4], \in_array($match[4][\strlen($match[4]) - 1], ['.', '!', '?', ' ']) ? '' : '.', $match[5]);
+                          }, $new);
+                        }
+                    
+                        if ($new !== $old) {
+                          file_put_contents($argv[1], $new);
+                        }
+                    EOPHP
+                      )" "$FILE"
+                      done
+                    cd ..
+                    
+                    if ! diff -qr --no-dereference a/ b/ >/dev/null; then
+                      echo "::error::Some exception messages might need a tweak. Please consider the patch below."
+                      echo -e "\n \n git apply - <<'EOF_PATCH'"
+                      diff -pru2 --no-dereference --color=always a/ b/ || true
+                      echo -e "EOF_PATCH\n \n"
+                      echo "Then commit the changes and push to your PR branch."
+                      exit 1
+                    fi
+
+            -
+                name: Check file permissions
+                if: always()
+                run: |
+                    # Check for executable files without a shebang or that are not recognized as executables
+                    cd a
+                    find -type f -perm /u+x,g+x,o+x | while read -r FILE_PATH; do
+                      if head -n 1 "$FILE_PATH" 2>/dev/null | grep -q '^#!'; then
+                        continue
+                      fi
+                      if file -b "$FILE_PATH" 2>/dev/null | grep -qi 'elf'; then
+                        continue
+                      fi
+                      echo "$FILE_PATH" >> ../PROBLEM_FILES
+                    done
+                    cd ..
+                    
+                    if [ -e PROBLEM_FILES ]; then
+                      echo "::error::Found executable files without a shebang or that are not recognized as executables:"
+                      echo -e "\n \n$(cat PROBLEM_FILES)\n \n"
+                      echo "Remove executable permissions: 'chmod -x <file>' for each listed file."
+                      rm PROBLEM_FILES
+                      exit 1
+                    fi
+
+            -
+                name: 🧠 InspectorBot can generate false-positives. Cherry-pick as fits 🍒. Reviewers will help.
+                if: always()
+                run: exit 0
+
