@@ -10,6 +10,10 @@ on:
                 required: false
                 type: boolean
                 default: false
+            php_version:
+                required: false
+                type: string
+                default: '8.2'
 
 env:
     GH_TOKEN: ${{ github.token }}
@@ -26,6 +30,15 @@ jobs:
                     path: o
 
             -
+                name: 'Set up PHP'
+                uses: 'shivammathur/setup-php@v2'
+                with:
+                    php-version: ${{ inputs.php_version }}
+                    coverage: none
+                env:
+                    update: true
+
+            -
                 name: Prepare code
                 env:
                     REPO: ${{ github.repository_owner }}/${{ github.event.repository.name }}
@@ -34,10 +47,13 @@ jobs:
                     # Install dependencies and select files to check
                     pip install codespell &
                     composer global require -q friendsofphp/php-cs-fixer:^3 seld/jsonlint symfony/yaml vincentlanglet/twig-cs-fixer:^3 &
-                    
+                    COMPOSER="o/composer.json" composer install --no-progress --no-interaction
                     mkdir a
                     [ -e o/.php-cs-fixer.dist.php ] && cp -a {o,a}/.php-cs-fixer.dist.php
                     [ -e o/.twig-cs-fixer.dist.php ] && cp -a {o,a}/.twig-cs-fixer.dist.php
+                    
+                    [ -e o/.php-cs-fixer.dist.php ] && sed -i "s#require __DIR__ \. '/vendor/rollerscapes/standards/#require __DIR__ \. '/../vendor/rollerscapes/standards/#g" a/.php-cs-fixer.dist.php
+                    [ -e o/.twig-cs-fixer.dist.php ] && sed -i "s#require __DIR__ \. '/vendor/rollerscapes/standards/#require __DIR__ \. '/../vendor/rollerscapes/standards/#g" a/.twig-cs-fixer.dist.php
                     
                     gh api --paginate "/repos/$REPO/pulls/$PR/files" \
                       | jq -rc '.[] | select(.status != "removed") | .filename' \
