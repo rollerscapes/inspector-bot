@@ -49,9 +49,9 @@ jobs:
                     composer global require -q friendsofphp/php-cs-fixer:^3 seld/jsonlint symfony/yaml vincentlanglet/twig-cs-fixer:^3 &
                     COMPOSER="o/composer.json" composer install --no-progress --no-interaction
                     mkdir a
+                    
                     [ -e o/.php-cs-fixer.dist.php ] && cp -a {o,a}/.php-cs-fixer.dist.php
                     [ -e o/.twig-cs-fixer.dist.php ] && cp -a {o,a}/.twig-cs-fixer.dist.php
-                    
                     
                     gh api --paginate "/repos/$REPO/pulls/$PR/files" \
                       | jq -rc '.[] | select(.status != "removed") | .filename' \
@@ -59,6 +59,7 @@ jobs:
                         mkdir -p "a/$(dirname "$FILENAME")"
                         cp -a {o,a}/"$FILENAME"
                       done
+                    
                     wait
                     
                     # Perform this after copying files to prevent overwrites when the files are modified in the PR
