@@ -53,6 +53,9 @@ jobs:
                     [ -e o/.php-cs-fixer.dist.php ] && cp -a {o,a}/.php-cs-fixer.dist.php
                     [ -e o/.twig-cs-fixer.dist.php ] && cp -a {o,a}/.twig-cs-fixer.dist.php
                     
+                    # Needed for PHP-CS-Fixer PHP version detection
+                    cp composer.json a/composer.json
+                    
                     gh api --paginate "/repos/$REPO/pulls/$PR/files" \
                       | jq -rc '.[] | select(.status != "removed") | .filename' \
                       | while read -r FILENAME; do
@@ -68,7 +71,7 @@ jobs:
 
             -
                 name: Check PHP code style
-                if: always()
+                if: always() && hashFiles('o/.php-cs-fixer.dist.php') != ''
                 run: |
                     # Run PHP-CS-Fixer
                     cp -a a b && cd b
