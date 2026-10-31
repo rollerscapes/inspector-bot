@@ -46,7 +46,7 @@ jobs:
                 run: |
                     # Install dependencies and select files to check
                     pip install codespell &
-                    composer global require -q friendsofphp/php-cs-fixer:^3 seld/jsonlint symfony/yaml vincentlanglet/twig-cs-fixer:^3 &
+                    composer global require -q friendsofphp/php-cs-fixer:^3 seld/jsonlint symfony/yaml vincentlanglet/twig-cs-fixer:^4 &
                     COMPOSER="o/composer.json" composer install --no-progress --no-interaction
                     mkdir a
                     
@@ -80,6 +80,8 @@ jobs:
                       echo -e "\n \n git apply - <<'EOF_PATCH'"
                       diff -pru2 --no-dereference --color=always a/ b/ || true
                       echo -e "EOF_PATCH\n \n"
+                      echo "Or run this single line to apply the same patch:"
+                      echo -e "\n \n echo $(diff -pru2 --no-dereference a/ b/ | gzip -9 | base64 -w0) | base64 --decode | gunzip | git apply -v\n \n"
                       echo "Then commit the changes and push to your PR branch."
                       exit 1
                     fi
@@ -98,6 +100,8 @@ jobs:
                       echo -e "\n \n git apply - <<'EOF_PATCH'"
                       diff -pru2 --no-dereference --color=always a/ b/ || true
                       echo -e "EOF_PATCH\n \n"
+                      echo "Or run this single line to apply the same patch:"
+                      echo -e "\n \n echo $(diff -pru2 --no-dereference a/ b/ | gzip -9 | base64 -w0) | base64 --decode | gunzip | git apply -v\n \n"
                       echo "Then commit the changes and push to your PR branch."
                       exit 1
                     fi
@@ -116,6 +120,8 @@ jobs:
 #                      echo -e "\n \n git apply - <<'EOF_PATCH'"
 #                      diff -pru2 --no-dereference --color=always a/ b/ || true
 #                      echo -e "EOF_PATCH\n \n"
+#                      echo "Or run this single line to apply the same patch:"
+#                      echo -e "\n \n echo $(diff -pru2 --no-dereference a/ b/ | gzip -9 | base64 -w0) | base64 --decode | gunzip | git apply -v\n \n"
 #                      echo "Then commit the changes and push to your PR branch."
 #                      exit 1
 #                    fi
@@ -134,6 +140,8 @@ jobs:
                       echo -e "\n \n git apply - <<'EOF_PATCH'"
                       diff -pru2 --no-dereference --color=always a/ b/ || true
                       echo -e "EOF_PATCH\n \n"
+                      echo "Or run this single line to apply the same patch:"
+                      echo -e "\n \n echo $(diff -pru2 --no-dereference a/ b/ | gzip -9 | base64 -w0) | base64 --decode | gunzip | git apply -v\n \n"
                       echo "Move the readonly keyword to properties then commit the changes and push to your PR branch."
                       exit 1
                     fi
@@ -151,6 +159,21 @@ jobs:
                       | jq -r '.[].parents | length > 1' | grep true > /dev/null && {
                         echo "::error::Merge commits are not allowed in pull requests."
                         echo "Please rebase your branch."
+                        exit 1
+                      } || true
+
+            -
+                name: Check commit attribution
+                if: always()
+                env:
+                    REPO: ${{ github.repository_owner }}/${{ github.event.repository.name }}
+                    PR: ${{ github.event.pull_request.number }}
+                run: |
+                    # Commits must be linked to a GitHub account
+                    gh api --paginate "/repos/$REPO/pulls/$PR/commits" \
+                      | jq -r '.[] | select(.author.login == null and (.commit.author.email | test("@users\\.noreply\\.github\\.com$") | not)) | "::error::Commit \(.sha[0:7]) uses email \(.commit.author.email), which is not linked to a GitHub account."' \
+                      | grep "::error::" && {
+                        echo "Please configure your git email to match your GitHub account."
                         exit 1
                       } || true
 
