@@ -64,15 +64,13 @@ jobs:
                       done
                     
                     wait
-                    
-                    # Perform this after copying files to prevent overwrites when the files are modified in the PR
-                    [ -e a/.php-cs-fixer.dist.php ] && sed -i "s#require __DIR__ \. '/vendor/rollerscapes/standards/#require __DIR__ \. '/../vendor/rollerscapes/standards/#g" a/.php-cs-fixer.dist.php
-                    [ -e a/.twig-cs-fixer.dist.php ] && sed -i "s#require __DIR__ \. '/vendor/rollerscapes/standards/#require __DIR__ \. '/../vendor/rollerscapes/standards/#g" a/.twig-cs-fixer.dist.php
 
             -
                 name: Check PHP code style
                 if: always() && hashFiles('o/.php-cs-fixer.dist.php') != ''
                 run: |
+                    sed -i "s#require __DIR__ \. '/vendor/rollerscapes/standards/#require __DIR__ \. '/../vendor/rollerscapes/standards/#g" a/.php-cs-fixer.dist.php
+                    
                     # Run PHP-CS-Fixer
                     cp -a a b && cd b
                     ~/.composer/vendor/bin/php-cs-fixer fix --using-cache no --show-progress none
@@ -93,6 +91,8 @@ jobs:
                 name: Check Twig code style
                 if: always() && hashFiles('o/.twig-cs-fixer.dist.php') != ''
                 run: |
+                    sed -i "s#require __DIR__ \. '/vendor/rollerscapes/standards/#require __DIR__ \. '/../vendor/rollerscapes/standards/#g" a/.twig-cs-fixer.dist.php
+                    
                     # Run Twig-CS-Fixer
                     rm -rf b && cp -a a b && cd b
                     ~/.composer/vendor/bin/twig-cs-fixer fix --no-cache
